@@ -1,0 +1,255 @@
+{% load staticfiles %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>クローリングシステム（デモ版）</title>
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="{% static 'assets/bootstrap/css/bootstrap.min.css' %}">
+</head>
+<body>
+<section>
+    <div class="bg-primary p-5 mt-5 mb-5">
+        <div class="container">
+            <h1>クローリングシステム（デモ版）</h1>
+        </div>
+    </div>
+</section>
+<section>
+    <div class="container">
+        <div class="row">{% csrf_token %}
+            {% comment %}<form id="id-url-reg-form" method="POST" enctype="multipart/form-data" novalidate="novalidate"> {% endcomment %}
+                <div class="col-lg-6 col-md-6 col-sm-12 row1">
+                    {% if latest_question_list %}
+                        ターゲットサイト : <select id="id-url-select" class="col-8 p-2 m-3" name="url">
+                        {% for question in latest_question_list %}
+                            <option class="m-2" value="{{ question.id }}">{{ question.question_text }}</option>
+                        {% endfor %}
+                        </select>
+                    {% else %}
+                        <p>No polls are available.</p>
+                    {% endif %}
+                </div>
+                <div class="col-lg-6 col-md-6 col-sm-12 row1">
+                    メールアドレス : <input id="id-email" class="col-8 p-1 m-3" type="email" placeholder="Your Email Address" name="email_addr" value="matuoka@applink.co.jp"/>
+                </div>
+            {% comment %}</form>{% endcomment %}
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-5 ml-auto">
+                <button type="button" class="btn btn-primary float-left" onclick="scrapyStart()">クローリング開始</button>
+                <img id="id-loading" class="ml-5 mt-2 float-left" src="{% static 'assets/img/loading.gif' %}" style="display: none"/>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-4 ml-auto">
+                    開始時間 :   <span id="id-start-time"></span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-4 ml-auto">
+                    クローリングした商品数 : <span id="id-total-num"></span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-4 ml-auto">
+                    作業中の商品数 : <span id="id-find-num"></span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-4 ml-auto">
+                作業を完了した商品数 : <span id="id-find-view"></span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-4 ml-auto">
+                現在の作業速度 : <span id="id-speed-view"></span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-4 ml-auto">
+                進捗状況 :
+                <div id="id-progress" class="progress" style="display: none;">
+                    <div id="id-progress-bar"  class="progress-bar progress-bar-striped progress-bar-animated"
+                         role="progressbar" aria-valuenow="0" aria-valuemin="0"
+                         aria-valuemax="100" style="width: 0"></div>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-10 col-md-10 col-sm-12 mt-5 mb-5 ml-auto">
+                <button id="id-covert-btn" type="button" class="btn btn-primary disabled float-left" onclick="convert_csv()">変換</button>
+                <img id="id-conert-loading" class="ml-5 mt-2 float-left" src="{% static 'assets/img/loading.gif' %}" style="display: none"/>
+            </div>
+        </div>
+    </div>
+</section>
+<!-- jQuery first, then Tether, then Bootstrap JS. -->
+<script src="{% static 'assets/js/jquery.min.js' %}"></script>
+<script src="{% static 'assets/js/tether.min.js' %}"></script>
+<script src="{% static 'assets/bootstrap/js/bootstrap.min.js' %}"></script>
+<script src="{% static 'assets/js/ajaxSend.js' %}"></script>
+<script>
+    var SCRAPY_START = 0;
+    var SCRAPY_PROGRESS = 1;
+    var SCRAPY_RESTART = 2;
+
+    function validateForm(x) {
+        var atpos = x.indexOf("@");
+        var dotpos = x.lastIndexOf(".");
+        if (atpos<1 || dotpos<atpos+2 || dotpos+2>=x.length) {
+            alert("有効な電子メールアドレスではありません");
+            return false;
+        }
+        return true;
+    }
+    var pre_find = 0;
+    var total_num=0;
+    function progressView(progress){
+        $("#id-loading").css("display","inherit");
+        var $progress = $("#id-progress"),
+            $progress_bar = $("#id-progress-bar");
+
+        var percent = progress.all == 0 ? 0:  parseInt((progress.find /progress.all)*10000)/100;
+        $progress_bar.attr("aria-valuenow",percent);
+        $progress_bar.css({
+            "width": percent + "%"
+        });
+        $progress_bar.html(percent + "%");
+        $("#id-total-num").html(total_num);
+        $("#id-find-num").html(progress.all);
+        $("#id-find-view").html(progress.find);
+        $("#id-speed-view").html(parseInt(( progress.find-pre_find)/3)+" / s");
+        pre_find = progress.find;
+        $progress.css("display","inherit");
+        console.log("all:"+ progress.all + "  find:" + progress.find + "  fail:"+ progress.fail + "  status:"+ progress.status);
+    }
+    var error_count =0;
+    var convert_type = 0;
+    var all_zero = 0;
+    var all_zero_max = 24;
+    var error_max_count = 10;
+    var scrapy_type = SCRAPY_START;
+
+    function scrapyStart(){
+        if (convert_type == 1 || scrapy_type == SCRAPY_PROGRESS) return;
+        //var formData = new FormData($("#id-url-reg-form")[0]);
+        var email_addr = $("#id-email").val();
+        if (! email_addr){
+            alert("メールアドレスを入力してくださ!");
+            return;
+        }
+        if (! validateForm(email_addr)) return;
+        $("#id-loading").css("display","inherit");
+
+        sendAjax(SCRAPY_START,email_addr);
+        scrapy_type = SCRAPY_PROGRESS;
+        var start_time = new Date();
+        var year = start_time.getFullYear(),
+            month = start_time.getMonth() + 1,
+            date = start_time.getDate(),
+            hour = start_time.getHours(),
+            minute = start_time.getMinutes(),
+            second = start_time.getSeconds();
+        var view_time = year + "年 " + month + "月 " + date + "日 " + hour + ":" + minute + ":" + second ;
+        $("#id-start-time").html(view_time)
+    }
+
+    function sendAjax(type,email_addr){
+        $.ajax({
+            url: "/dwsyahoo/question_id/",
+            type: 'POST',
+            data: {
+                'url_id': parseInt($("#id-url-select").val()),
+                'type': type,
+                'email_addr':email_addr
+                    },
+            dataType: 'json',
+            success: function (data) {
+                if(data.result == "SUCCESS"){
+                    if(data.content.find_type==1 || data.content.find_type==3 ){
+                        all_zero = 0;
+                        error_count = 0;
+                        sendAjax(SCRAPY_START,email_addr);
+                    }
+                    total_num = total_num + parseInt(data.content.find);
+                    progressView(data.content);
+                    $("#id-loading").css("display","none");
+                    console.log(data.content);
+                    if (data.content.find_type==2){
+                        convert_type = 1;
+                        $("#id-covert-btn").removeClass("disabled");
+                        alert("作業は終了しました。");
+                    }
+                }
+                else if (data.result == "PROGRESS"){
+                    progressView(data.content);
+                    if( data.content.status == 1){
+                        if (data.content.all == 0 ){
+                            all_zero += 1;
+                            if (all_zero>all_zero_max){
+                                all_zero = 0;
+                                error_count = 0;
+                                sendAjax(SCRAPY_RESTART,email_addr);
+                                return;
+                            }
+                        }
+                        setTimeout(function(){sendAjax(SCRAPY_PROGRESS,email_addr);},5000);
+                    }
+                }
+                else if (data.result == "FAIL"){
+                    //alert("ターゲットサイトとセッションが切れました。");
+                    if (data.content.indexOf("running") === -1) {
+                        alert("ターゲットサイトとセッションが切れました。");
+                    } else {
+                        alert("サーバーは既に実行中です...")
+                    }
+                    $("#id-loading").css("display","none");
+                    $("#id-progress").css("display","none");
+                }
+            },
+            error: function () {
+                //alert("ターゲットサイトとセッションが切れました。");
+                console.log("Server Error");
+{#                error_count += 1;#}
+{#                if (error_count<error_max_count){#}
+{#                    setTimeout(function(){sendAjax(type,email_addr);},5000);#}
+                    $("#id-loading").css("display","none");
+                    $("#id-progress").css("display","none");
+{#                }#}
+            }
+        });
+    }
+    var convert_type = 0;
+    function convert_csv(){
+        if (convert_type == 0) return;
+        $("#id-conert-loading").css("display","inherit");
+        $.ajax({
+            url: "/dwsyahoo/convert_csv/",
+            type: 'POST',
+            data: {
+                'type': convert_type
+            },
+            dataType: 'json',
+            success: function (data) {
+                if (data.result == "SUCCESS") {
+                	convert_type == 0;
+                    alert("変換に成功!");
+                    $("#id-conert-loading").css("display", "none");
+                }
+                else if (data.result == "FAIL") {
+                    alert("変換エラー!");
+                    $("#id-convert-loading").css("display", "none");
+                }
+            },
+            error: function () {
+                alert("変換エラー!");
+                $("#id-conert-loading").css("display", "none");
+            }
+        });
+    }
+</script>
+</body>
+</html>
